@@ -53,19 +53,18 @@ jobs:
     if: failure()
 
     steps:
-      # Step 1: Clone the ANALYZER repo (separate from ci-sample)
+      # Step 1: Clone the analyzer repo — files live at the repo root (no subdir)
       - name: Clone CI Log Analyzer
         run: |
           git clone https://github.com/JinilShukla/ci-log-analyzer.git analyzer
-          cd analyzer/ci_log_analyzer
-          pip install -r requirements.txt
+          pip install -r analyzer/requirements.txt
 
       # Step 2: Download the failed job log using GitHub API
       - name: Download failed job logs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd analyzer/ci_log_analyzer
+          cd analyzer
           python3 downloader.py \
             --repo "${{ github.repository }}" \
             --run_id "${{ github.run_id }}"
@@ -74,7 +73,7 @@ jobs:
       - name: Find log file
         id: find_log
         run: |
-          LOG=$(find analyzer/ci_log_analyzer/logs/${{ github.run_id }} \
+          LOG=$(find analyzer/logs/${{ github.run_id }} \
             -name "build-and-test_*.txt" | head -1)
           echo "log_file=$LOG" >> $GITHUB_OUTPUT
           echo "Found: $LOG"
@@ -86,9 +85,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd analyzer/ci_log_analyzer
+          cd analyzer
           python3 analyzer.py \
-            --input    "../../${{ steps.find_log.outputs.log_file }}" \
+            --input    "../${{ steps.find_log.outputs.log_file }}" \
             --repo     "${{ github.repository }}" \
             --run_id   "${{ github.run_id }}" \
             --job_name "build-and-test" \
@@ -105,7 +104,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd analyzer/ci_log_analyzer
+          cd analyzer
           python3 pr_commenter.py \
             --repo      "${{ github.repository }}" \
             --pr        "${{ github.event.pull_request.number }}" \
