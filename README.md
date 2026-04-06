@@ -7,3 +7,4 @@ It has two jobs:
 - `failing-job` — intentionally fails (ModuleNotFoundError)
 # trigger analysis
 re-trigger Sun Apr  5 20:12:44 PDT 2026
+retry Sun Apr  5 20:16:02 PDT 2026
