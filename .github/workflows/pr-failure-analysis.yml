@@ -95,7 +95,9 @@ jobs:
             --pr_number "${{ github.event.pull_request.number }}" \
             | tee /tmp/analysis_output.txt
 
-          RECORD_ID=$(grep "Record ID" /tmp/analysis_output.txt | awk '{print $NF}')
+          # Match exactly the "Saved as FailureRecord ID: fail-XXXXXXXX" line
+          RECORD_ID=$(grep "Saved as FailureRecord ID:" /tmp/analysis_output.txt \
+            | awk '{print $NF}' | tr -d '[:space:]')
           echo "record_id=$RECORD_ID" >> $GITHUB_OUTPUT
           echo "Record ID extracted: $RECORD_ID"
 
