@@ -1,0 +1,52 @@
+# This is the sample workflow we use to generate real GitHub Actions logs.
+# It intentionally has a passing job and a failing job so we get
+# interesting logs to analyze.
+
+name: CI Sample
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch: # allows manual trigger from GitHub UI
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Run passing tests
+        run: |
+          echo "Running tests..."
+          python -m pytest tests/ -v || true
+
+      - name: Simulate a build step
+        run: |
+          echo "Building project..."
+          echo "Build complete."
+
+  failing-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Intentional failure — missing module
+        run: |
+          python -c "import non_existent_module"
+
+      - name: This step will be skipped
+        run: echo "Never reached"
