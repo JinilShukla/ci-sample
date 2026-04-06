@@ -1,0 +1,136 @@
+# pr-failure-analysis.yml
+#
+# Triggers on every pull request.
+# When a CI job fails, a second job downloads that job's log,
+# runs the analyzer, and posts the result as a PR comment.
+#
+# Requirements (set in repo Settings → Secrets and Variables → Actions):
+#   GEMINI_API_KEY  — Google AI Studio key (free tier)
+#   GITHUB_TOKEN    — automatically provided by GitHub Actions
+
+name: PR CI + Failure Analysis
+
+on:
+  pull_request:
+    branches: ["main"]
+
+# Allow the analysis job to post PR comments
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # 1. The real CI job (copy your actual test steps here)
+  # ─────────────────────────────────────────────────────────────────
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+    # Expose outcome so the analysis job can check it
+    outputs:
+      job_status: ${{ job.status }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Run tests
+        run: |
+          echo "Running tests..."
+          python -m pytest tests/ -v || true
+
+      - name: Intentional failure — missing module
+        # This is the step that will fail and trigger the analysis.
+        # Replace this with your real failing step.
+        run: |
+          python -c "import non_existent_module"
+
+  # ─────────────────────────────────────────────────────────────────
+  # 2. Analysis job — runs ONLY when the CI job above fails
+  # ─────────────────────────────────────────────────────────────────
+  analyze-failure:
+    name: Analyze CI Failure
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    # Only run this job when the CI job failed
+    if: failure()
+
+    steps:
+      - name: Checkout analyzer code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install analyzer dependencies
+        run: |
+          cd ci_log_analyzer
+          pip install -r requirements.txt
+
+      - name: Get the failed job's run ID
+        id: run_info
+        run: |
+          echo "run_id=${{ github.run_id }}" >> $GITHUB_OUTPUT
+          echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
+
+      - name: Download failed job logs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd ci_log_analyzer
+          python3 downloader.py \
+            --repo "${{ steps.run_info.outputs.repo }}" \
+            --run_id "${{ steps.run_info.outputs.run_id }}"
+
+      - name: Find the failed log file
+        id: find_log
+        run: |
+          LOG_FILE=$(find ci_log_analyzer/logs/${{ steps.run_info.outputs.run_id }} \
+            -name "build-and-test_*.txt" | head -1)
+          echo "log_file=$LOG_FILE" >> $GITHUB_OUTPUT
+          echo "Found log: $LOG_FILE"
+
+      - name: Run LLM analysis
+        id: analysis
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd ci_log_analyzer
+          python3 analyzer.py \
+            --input  "../${{ steps.find_log.outputs.log_file }}" \
+            --repo   "${{ steps.run_info.outputs.repo }}" \
+            --run_id "${{ steps.run_info.outputs.run_id }}" \
+            --job_name "build-and-test" \
+            --branch "${{ steps.run_info.outputs.branch }}" \
+            --pr_number "${{ steps.run_info.outputs.pr_number }}" \
+            | tee /tmp/analysis_output.txt
+
+          # Extract the record ID from analyzer output
+          RECORD_ID=$(grep "Record ID" /tmp/analysis_output.txt | awk '{print $NF}')
+          echo "record_id=$RECORD_ID" >> $GITHUB_OUTPUT
+
+      - name: Post analysis as PR comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd ci_log_analyzer
+          python3 pr_commenter.py \
+            --repo   "${{ steps.run_info.outputs.repo }}" \
+            --pr     "${{ steps.run_info.outputs.pr_number }}" \
+            --record-id "${{ steps.analysis.outputs.record_id }}" \
+            --clean
